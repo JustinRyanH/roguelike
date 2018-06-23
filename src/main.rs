@@ -3,11 +3,12 @@ extern crate specs;
 #[macro_use]
 extern crate specs_derive;
 
-use tcod::console::*;
+use tcod::console::{FontType, FontLayout, Root};
 
 mod state_machine;
 mod components;
 mod game;
+mod map;
 use state_machine::Event;
 
 const SCREEN_WIDTH: i32 = 80;

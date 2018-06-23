@@ -1,10 +1,11 @@
 use specs;
 use tcod;
 use std;
+use map;
 
 use specs::{Component, VecStorage};
 use specs::World;
-use specs::{WriteStorage, WriteExpect, ReadStorage, System};
+use specs::{WriteStorage, WriteExpect, ReadStorage, ReadExpect, System};
 use specs::{Dispatcher, DispatcherBuilder};
 
 use std::sync::{Arc, Mutex};
@@ -54,10 +55,11 @@ pub struct MoveEvent(pub i32, pub i32);
 struct Print;
 impl<'a> System<'a> for Print {
     type SystemData = (WriteExpect<'a, DisplayConsole>,
+                       ReadExpect<'a, map::Map>,
                        ReadStorage<'a, Position>,
                        ReadStorage<'a, Displayable>);
 
-    fn run(&mut self, (mut console, position, displayable): Self::SystemData) {
+    fn run(&mut self, (mut console, map, position, displayable): Self::SystemData) {
         use specs::Join;
         use tcod::Console;
 
@@ -70,6 +72,8 @@ impl<'a> System<'a> for Print {
             (*con).put_char(position.old_x, position.old_y, ' ', tcod::BackgroundFlag::None);
         }
 
+        map.render(&mut *con);
+
         for (position, displayable) in data {
             (*con).set_default_foreground(displayable.color);
             (*con).put_char(position.x, position.y, displayable.char, tcod::BackgroundFlag::None);
@@ -79,18 +83,20 @@ impl<'a> System<'a> for Print {
 
 struct HandleMoveEvents;
 impl<'a> System<'a> for HandleMoveEvents {
-    type SystemData = (specs::Entities<'a>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
+    type SystemData = (specs::Entities<'a>, ReadExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
 
-    fn run(&mut self, (entities, mut pos, mut event_storage): Self::SystemData) {
+    fn run(&mut self, (entities, map, mut pos, mut event_storage): Self::SystemData) {
         use specs::Join;
 
         let mut to_remove = Vec::new();
 
         for (ent, pos, event) in (&*entities, &mut pos, &mut event_storage).join() {
-            pos.old_x = pos.x;
-            pos.old_y = pos.y;
-            pos.x += event.0;
-            pos.y += event.1;
+            if map.can_walk(pos.x + event.0, pos.y + event.1) {
+                pos.old_x = pos.x;
+                pos.old_y = pos.y;
+                pos.x += event.0;
+                pos.y += event.1;
+            }
             to_remove.push(ent);
         }
         for e in to_remove {
@@ -126,13 +132,14 @@ pub fn create_npc(world: &mut World, x: i32, y: i32) {
         .build();
 }
 
-pub fn create_world<'a, 'b>(con: tcod::console::Offscreen) -> (World, Dispatcher<'a, 'b>) {
+pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map) -> (World, Dispatcher<'a, 'b>) {
     let mut world = World::new();
     world.register::<Position>();
     world.register::<Displayable>();
     world.register::<MoveEvent>();
     world.add_resource(DisplayConsole(Arc::new(Mutex::new(con))));
     world.add_resource(Turns(0));
+    world.add_resource(map);
     let mut dispatcher = DispatcherBuilder::new()
         .with(HandleMoveEvents, "move_event", &[])
         .with_thread_local(Print).build();
