@@ -71,7 +71,7 @@ impl<'a> System<'a> for Print {
         let mut data = (&position, &displayable).join().collect::<Vec<_>>();
         data.sort_by(|&a, &b| a.0.z.cmp(&b.0.z));
 
-        for (position, displayable) in data.iter() {
+        for (position, _) in data.iter() {
             (*con).put_char(position.old_x, position.old_y, ' ', BackgroundFlag::None);
         }
 
@@ -103,6 +103,8 @@ impl<'a> System<'a> for HandleMoveEvents {
         }
     }
 }
+
+struct Turns(i64);
 
 struct DisplayConsole(Arc<Mutex<Offscreen>>);
 impl DisplayConsole {
@@ -170,6 +172,8 @@ fn main() {
     con.set_default_foreground(colors::WHITE);
 
     world.add_resource(DisplayConsole(Arc::new(Mutex::new(con))));
+    world.add_resource(Turns(0));
+
     let mut dispatcher = DispatcherBuilder::new()
         .with(HandleMoveEvents, "move_event", &[])
         .with_thread_local(Print).build();
@@ -180,9 +184,11 @@ fn main() {
         dispatcher.dispatch(&mut world.res);
         world.maintain();
         {
+            world.write_resource::<Turns>().0 += 1;
             let console = world.read_resource::<DisplayConsole>();
             blit(&*console.get(), (0, 0), (SCREEN_WIDTH, SCREEN_HEIGHT), &mut root, (0, 0), 1.0, 1.0);
         }
+        root.print(0, 0, format!("turns: {}", world.read_resource::<Turns>().0));
         root.flush();
         let exit = handle_keys(&mut root, &mut world, player);
         if exit {
