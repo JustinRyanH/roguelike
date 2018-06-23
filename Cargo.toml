@@ -1,0 +1,9 @@
+[package]
+name = "rogue"
+version = "0.1.0"
+authors = ["L3nn0x <dragon.super@laposte.net>"]
+
+[dependencies]
+tcod = { path = "../tcod-rs" }
+specs = "*"
+specs-derive = "*"
