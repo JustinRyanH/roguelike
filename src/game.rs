@@ -5,6 +5,7 @@ use tcod;
 use tcod::Console;
 
 use map;
+use rect;
 
 pub struct Game<'a, 'b> {
     world: World,
@@ -21,8 +22,7 @@ impl<'a, 'b> Game<'a, 'b> {
 
         let (mut world, dispatcher) = create_world(con, map);
 
-        let player = create_player(&mut world, 5, 5);
-        create_npc(&mut world, 4, 4);
+        let player = create_player(&mut world, 25, 23);
         Game {
             world: world,
             dispatcher: dispatcher,
@@ -52,10 +52,6 @@ impl<'a, 'b> State for Game<'a, 'b> {
         let console = self.world.read_resource::<DisplayConsole>();
         console.get().print(0, 35, format!("turns: {}", self.world.read_resource::<Turns>().0));
         tcod::console::blit(&*console.get(), (0, 0), (0, 0), screen, (0, 0), 1.0, 1.0);
-    }
-
-    fn on_start(&mut self) {
-        self.world.write_resource::<map::Map>().set(6, 6, map::Tile::wall());
     }
 
     fn update(&mut self) -> Transition {

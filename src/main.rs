@@ -9,6 +9,7 @@ mod state_machine;
 mod components;
 mod game;
 mod map;
+mod rect;
 use state_machine::Event;
 
 const SCREEN_WIDTH: i32 = 80;
