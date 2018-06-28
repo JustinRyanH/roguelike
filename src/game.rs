@@ -7,6 +7,8 @@ use tcod::Console;
 use map;
 use rand;
 
+use observer::*;
+
 pub struct Game<'a, 'b> {
     world: World,
     dispatcher: Dispatcher<'a, 'b>,
@@ -52,12 +54,6 @@ impl<'a, 'b> State for Game<'a, 'b> {
         let console = self.world.read_resource::<DisplayConsole>();
         console.get().print(0, 35, format!("turns: {}", self.world.read_resource::<Turns>().0));
         tcod::console::blit(&*console.get(), (0, 0), (0, 0), screen, (0, 0), 1.0, 1.0);
-    }
-
-    fn on_start(&mut self) {
-        let storage = self.world.write_resource::<Rng>();
-        let mut rng = storage.0.lock().unwrap();
-        let player = self.world.write_resource::<map::Map>().generate_map(&mut rng);
     }
 
     fn update(&mut self) -> Transition {

@@ -55,7 +55,7 @@ pub struct MoveEvent(pub i32, pub i32);
 struct Print;
 impl<'a> System<'a> for Print {
     type SystemData = (WriteExpect<'a, DisplayConsole>,
-                       ReadExpect<'a, map::Map<'static>>,
+                       ReadExpect<'a, map::Map>,
                        ReadStorage<'a, Position>,
                        ReadStorage<'a, Displayable>);
 
@@ -83,7 +83,7 @@ impl<'a> System<'a> for Print {
 
 struct HandleMoveEvents;
 impl<'a> System<'a> for HandleMoveEvents {
-    type SystemData = (specs::Entities<'a>, ReadExpect<'a, map::Map<'static>>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
+    type SystemData = (specs::Entities<'a>, ReadExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
 
     fn run(&mut self, (entities, map, mut pos, mut event_storage): Self::SystemData) {
         use specs::Join;
@@ -134,7 +134,7 @@ pub fn create_npc(world: &mut World, x: i32, y: i32) {
         .build();
 }
 
-pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map<'static>, rng: tcod::random::Rng) -> (World, Dispatcher<'a, 'b>) {
+pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map, rng: tcod::random::Rng) -> (World, Dispatcher<'a, 'b>) {
     let mut world = World::new();
     world.register::<Position>();
     world.register::<Displayable>();
