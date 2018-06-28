@@ -112,7 +112,13 @@ impl Map {
         }
     }
 
-    pub fn generate_map(&mut self, rng: &mut tcod::random::Rng) -> (i32, i32) {
+    pub fn is_in_fov(&self, x: i32, y: i32) -> bool {
+        self.fov.lock().unwrap().is_in_fov(x, y)
+    }
+
+    pub fn generate_map<T>(&mut self, rng: &mut tcod::random::Rng, mut create_objects: T) -> (i32, i32)
+        where T: (FnMut(&rect::Rect, &mut tcod::random::Rng) -> ())
+    {
         let mut rooms = vec![];
 
         let mut start = (0, 0);
@@ -133,6 +139,7 @@ impl Map {
             if !failed {
                 // "paint" it to the map's tiles
                 self.create_room(new_room);
+                create_objects(&new_room, rng);
                 let (new_x, new_y) = new_room.center();
                 if rooms.is_empty() {
                     start = (new_x, new_y);

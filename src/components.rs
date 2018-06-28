@@ -22,6 +22,24 @@ struct Position {
     z: i8
 }
 
+#[derive(Component)]
+#[storage(VecStorage)]
+struct Properties {
+    name: String,
+    blocks: bool,
+    alive: bool
+}
+
+impl Properties {
+    fn new(name: &str, blocks: bool, alive: bool) -> Self {
+        Properties {
+            name: name.into(),
+            blocks: blocks,
+            alive: alive
+        }
+    }
+}
+
 impl Position {
     fn new(x: i32, y: i32, z: i8) -> Position {
         Position{
@@ -54,6 +72,10 @@ impl Displayable {
 #[storage(VecStorage)]
 pub struct MoveEvent(pub i32, pub i32);
 
+#[derive(Component)]
+#[storage(VecStorage)]
+struct MeleeEvent(specs::Entity);
+
 struct Print;
 impl<'a> System<'a> for Print {
     type SystemData = (WriteExpect<'a, DisplayConsole>,
@@ -77,31 +99,64 @@ impl<'a> System<'a> for Print {
         map.render(&mut *con);
 
         for (position, displayable) in data {
-            (*con).set_default_foreground(displayable.color);
-            (*con).put_char(position.x, position.y, displayable.char, tcod::BackgroundFlag::None);
+            if map.is_in_fov(position.x, position.y) {
+                (*con).set_default_foreground(displayable.color);
+                (*con).put_char(position.x, position.y, displayable.char, tcod::BackgroundFlag::None);
+            }
+        }
+    }
+}
+
+struct HandleMelee;
+impl<'a> System<'a> for HandleMelee {
+    type SystemData = (specs::Entities<'a>, WriteExpect<'a, observer::Dispatcher<'static>>, WriteStorage<'a, MeleeEvent>, ReadStorage<'a, Properties>);
+
+    fn run(&mut self, (entities, mut dispatcher, mut melee_storage, properties): Self::SystemData) {
+        use specs::Join;
+
+        let mut to_remove = Vec::new();
+
+        for (ent, melee, prop) in (&*entities, &mut melee_storage, &properties).join() {
+            let p = properties.get(melee.0).unwrap();
+            dispatcher.dispatch(observer::Event::Log(ent, format!("{} attacked the {}", p.name, prop.name)));
+            to_remove.push(ent);
+        }
+        for e in to_remove {
+            melee_storage.remove(e);
         }
     }
 }
 
 struct HandleMoveEvents;
 impl<'a> System<'a> for HandleMoveEvents {
-    type SystemData = (specs::Entities<'a>, WriteExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>, WriteExpect<'a, observer::Dispatcher<'static>>, ReadExpect<'a, Player>);
+    type SystemData = (specs::Entities<'a>, WriteExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>, WriteExpect<'a, observer::Dispatcher<'static>>, ReadExpect<'a, Player>, ReadStorage<'a, Properties>, WriteStorage<'a, MeleeEvent>);
 
-    fn run(&mut self, (entities, mut map, mut pos, mut event_storage, mut dispatcher, player): Self::SystemData) {
+    fn run(&mut self, (entities, mut map, mut pos, mut event_storage, mut dispatcher, player, properties, mut melee_storage): Self::SystemData) {
         use specs::Join;
 
         let mut to_remove = Vec::new();
 
+        let positions: Vec<(specs::Entity, i32,i32)> = (&*entities, &pos, &properties).join().filter_map(|e| {
+            if e.2.blocks && e.0 != player.0 {
+                Some((e.0, e.1.x, e.1.y))
+            } else {
+                None
+            }
+        }).collect();
+
         for (ent, pos, event) in (&*entities, &mut pos, &mut event_storage).join() {
-            if map.can_walk(pos.x + event.0, pos.y + event.1) {
+            let other = positions.iter().find(|(_, x, y)| { (*x, *y) == (pos.x + event.0, pos.y + event.1) });
+            if map.can_walk(pos.x + event.0, pos.y + event.1) && other == None {
                 pos.old_x = pos.x;
                 pos.old_y = pos.y;
                 pos.x += event.0;
                 pos.y += event.1;
-                dispatcher.dispatch(observer::Event::Log(ent, format!("Moved {} {}", pos.x, pos.y)));
                 if ent == player.0 {
                     map.recompute_fov(pos.x, pos.y);
                 }
+            } else if let Some(other) = other {
+                // this is considered as a melee attack
+                melee_storage.insert(other.0, MeleeEvent(ent)).unwrap();
             }
             to_remove.push(ent);
         }
@@ -132,28 +187,29 @@ pub fn create_player(world: &mut World, x: i32, y: i32) -> specs::Entity {
     world.create_entity()
         .with(Position::new(x, y, 1))
         .with(Displayable::new('@', tcod::colors::WHITE))
+        .with(Properties::new("You", true, true))
         .build()
 }
 
-pub fn create_npc(world: &mut World, x: i32, y: i32) {
+pub fn create_npc(world: &mut World, x: i32, y: i32, c: char, name: &str, color: tcod::colors::Color) {
     world.create_entity()
         .with(Position::new(x, y, 0))
-        .with(Displayable::new('o', tcod::colors::YELLOW))
+        .with(Displayable::new(c, color))
+        .with(Properties::new(name, true, true))
         .build();
 }
 
-pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map, rng: tcod::random::Rng) -> (World, Dispatcher<'a, 'b>) {
+pub fn create_world<'a, 'b>(con: tcod::console::Offscreen) -> (World, Dispatcher<'a, 'b>) {
     let mut world = World::new();
     world.register::<Position>();
     world.register::<Displayable>();
     world.register::<MoveEvent>();
     world.add_resource(DisplayConsole(Arc::new(Mutex::new(con))));
     world.add_resource(Turns(0));
-    world.add_resource(map);
-    world.add_resource(Rng(Arc::new(Mutex::new(rng))));
     world.add_resource(observer::Dispatcher::new());
     let mut dispatcher = DispatcherBuilder::new()
         .with(HandleMoveEvents, "move_event", &[])
+        .with(HandleMelee, "melee_event", &["move_event"])
         .with_thread_local(Print).build();
     dispatcher.setup(&mut world.res);
     (world, dispatcher)
