@@ -55,7 +55,7 @@ pub struct MoveEvent(pub i32, pub i32);
 struct Print;
 impl<'a> System<'a> for Print {
     type SystemData = (WriteExpect<'a, DisplayConsole>,
-                       ReadExpect<'a, map::Map>,
+                       ReadExpect<'a, map::Map<'static>>,
                        ReadStorage<'a, Position>,
                        ReadStorage<'a, Displayable>);
 
@@ -83,7 +83,7 @@ impl<'a> System<'a> for Print {
 
 struct HandleMoveEvents;
 impl<'a> System<'a> for HandleMoveEvents {
-    type SystemData = (specs::Entities<'a>, ReadExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
+    type SystemData = (specs::Entities<'a>, ReadExpect<'a, map::Map<'static>>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
 
     fn run(&mut self, (entities, map, mut pos, mut event_storage): Self::SystemData) {
         use specs::Join;
@@ -106,6 +106,8 @@ impl<'a> System<'a> for HandleMoveEvents {
 }
 
 pub struct Turns(pub i64);
+
+pub struct Rng(pub Arc<Mutex<tcod::random::Rng>>);
 
 pub struct DisplayConsole(Arc<Mutex<tcod::console::Offscreen>>);
 impl DisplayConsole {
@@ -132,7 +134,7 @@ pub fn create_npc(world: &mut World, x: i32, y: i32) {
         .build();
 }
 
-pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map) -> (World, Dispatcher<'a, 'b>) {
+pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map<'static>, rng: tcod::random::Rng) -> (World, Dispatcher<'a, 'b>) {
     let mut world = World::new();
     world.register::<Position>();
     world.register::<Displayable>();
@@ -140,6 +142,7 @@ pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map) -> (Wo
     world.add_resource(DisplayConsole(Arc::new(Mutex::new(con))));
     world.add_resource(Turns(0));
     world.add_resource(map);
+    world.add_resource(Rng(Arc::new(Mutex::new(rng))));
     let mut dispatcher = DispatcherBuilder::new()
         .with(HandleMoveEvents, "move_event", &[])
         .with_thread_local(Print).build();

@@ -7,3 +7,4 @@ authors = ["L3nn0x <dragon.super@laposte.net>"]
 tcod = { path = "../tcod-rs" }
 specs = "*"
 specs-derive = "*"
+rand = "*"

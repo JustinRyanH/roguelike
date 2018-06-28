@@ -5,7 +5,7 @@ use tcod;
 use tcod::Console;
 
 use map;
-use rect;
+use rand;
 
 pub struct Game<'a, 'b> {
     world: World,
@@ -14,13 +14,13 @@ pub struct Game<'a, 'b> {
 }
 
 impl<'a, 'b> Game<'a, 'b> {
-    pub fn new(screen_width: i32, screen_height: i32) -> Game<'a, 'b> {
+    pub fn new(seed: u32, screen_width: i32, screen_height: i32) -> Game<'a, 'b> {
         let mut con = tcod::console::Offscreen::new(screen_width, screen_height);
         con.set_default_foreground(tcod::colors::WHITE);
 
         let map = map::Map::new(screen_width, screen_height - 15);
 
-        let (mut world, dispatcher) = create_world(con, map);
+        let (mut world, dispatcher) = create_world(con, map, tcod::random::Rng::new_with_seed(tcod::random::Algo::CMWC, seed));
 
         let player = create_player(&mut world, 25, 23);
         Game {
@@ -52,6 +52,12 @@ impl<'a, 'b> State for Game<'a, 'b> {
         let console = self.world.read_resource::<DisplayConsole>();
         console.get().print(0, 35, format!("turns: {}", self.world.read_resource::<Turns>().0));
         tcod::console::blit(&*console.get(), (0, 0), (0, 0), screen, (0, 0), 1.0, 1.0);
+    }
+
+    fn on_start(&mut self) {
+        let storage = self.world.write_resource::<Rng>();
+        let mut rng = storage.0.lock().unwrap();
+        let player = self.world.write_resource::<map::Map>().generate_map(&mut rng);
     }
 
     fn update(&mut self) -> Transition {

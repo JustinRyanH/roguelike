@@ -2,6 +2,8 @@ use tcod;
 use rect;
 use std;
 
+use std::sync::{Arc, Mutex};
+
 const COLOR_DARK_WALL: tcod::Color = tcod::Color{r: 0, g: 0, b: 100};
 const COLOR_DARK_GROUND: tcod::Color = tcod::Color{r: 50, g: 50, b: 150};
 
@@ -56,19 +58,45 @@ impl Room {
     }
 }
 
-pub struct Map {
-    rooms: Vec<Room>,
-    width: i32,
-    height: i32
+pub struct Map<'a> {
+    rooms: std::collections::HashMap<(i32, i32), Room>,
+    bsp: Arc<Mutex<tcod::bsp::Bsp<'a>>>
 }
 
-impl Map {
-    pub fn new(width: i32, height: i32) -> Map {
+impl<'a> Map<'a> {
+    pub fn new(width: i32, height: i32) -> Map<'a> {
         Map {
-            rooms: Vec::new(),
-            width: width,
-            height: height
+            rooms: std::collections::HashMap::new(),
+            bsp: Arc::new(Mutex::new(tcod::bsp::Bsp::new_with_size(0, 0, width, height)))
         }
+    }
+
+    pub fn generate_map(&mut self, rng: &mut tcod::random::Rng) -> (i32, i32) {
+        let mut bsp = self.bsp.lock().unwrap();
+        bsp.split_recursive(Some(rng), 5, 15, 15, 0.7, 0.6);
+        let mut rooms = &mut self.rooms;
+        let mut player = (0, 0);
+        bsp.traverse(tcod::bsp::TraverseOrder::PreOrder, |node| {
+            if !node.is_leaf() {
+                return true;
+            }
+            let x1 = rng.get_int(node.x, node.x + node.w / 2);
+            let y1 = rng.get_int(node.y, node.y + node.h / 2);
+            let mut x2 = rng.get_int(std::cmp::max(node.x, x1), node.x + node.w);
+            while x2 - x1 <= 2 {
+                x2 = rng.get_int(std::cmp::max(node.x, x1), node.x + node.w);
+            }
+            let mut y2 = rng.get_int(std::cmp::max(node.y, y1), node.y + node.h);
+            while y2 - y1 <= 2 {
+                y2 = rng.get_int(std::cmp::max(node.y, y1), node.y + node.h);
+            }
+            rooms.insert((node.x, node.y), Room::new(rect::Rect::new(x1, y1, x2 - x1, y2 - y1)));
+            if player == (0, 0) {
+                player = (x1 + 1, y1 + 1);
+            }
+            true
+        });
+        player
     }
 
     pub fn can_walk(&self, x: i32, y: i32) -> bool {
@@ -76,7 +104,7 @@ impl Map {
     }
 
     pub fn render(&self, con: &mut tcod::Console) {
-        for room in &self.rooms {
+        for room in self.rooms.values() {
             room.render(con);
         }
     }

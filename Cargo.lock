@@ -266,6 +266,7 @@ dependencies = [
 name = "rogue"
 version = "0.1.0"
 dependencies = [
+ "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "specs 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "specs-derive 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tcod 0.12.1",

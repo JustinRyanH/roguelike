@@ -2,6 +2,7 @@ extern crate tcod;
 extern crate specs;
 #[macro_use]
 extern crate specs_derive;
+extern crate rand;
 
 use tcod::console::{FontType, FontLayout, Root};
 
@@ -23,7 +24,7 @@ fn main() {
         .title("Nameless")
         .init();
     
-    let mut machine = state_machine::StateMachine::new(Box::new(game::Game::new(SCREEN_WIDTH, SCREEN_HEIGHT)));
+    let mut machine = state_machine::StateMachine::new(Box::new(game::Game::new(42, SCREEN_WIDTH, SCREEN_HEIGHT)));
 
     machine.start();
 
