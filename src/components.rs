@@ -27,15 +27,19 @@ struct Position {
 struct Properties {
     name: String,
     blocks: bool,
-    alive: bool
+    alive: bool,
+    max_hp: i32,
+    hp: i32
 }
 
 impl Properties {
-    fn new(name: &str, blocks: bool, alive: bool) -> Self {
+    fn new(name: &str, blocks: bool, alive: bool, max_hp: i32, hp: i32) -> Self {
         Properties {
             name: name.into(),
             blocks: blocks,
-            alive: alive
+            alive: alive,
+            max_hp: max_hp,
+            hp: hp
         }
     }
 }
@@ -76,6 +80,22 @@ pub struct MoveEvent(pub i32, pub i32);
 #[storage(VecStorage)]
 struct MeleeEvent(specs::Entity);
 
+#[derive(Component)]
+#[storage(VecStorage)]
+pub struct Fighter {
+    defense: i32,
+    attack: i32
+}
+
+impl Fighter {
+    pub fn new(attack: i32, defense: i32) -> Self {
+        Fighter {
+            attack: attack,
+            defense: defense
+        }
+    }
+}
+
 struct Print;
 impl<'a> System<'a> for Print {
     type SystemData = (WriteExpect<'a, DisplayConsole>,
@@ -109,16 +129,24 @@ impl<'a> System<'a> for Print {
 
 struct HandleMelee;
 impl<'a> System<'a> for HandleMelee {
-    type SystemData = (specs::Entities<'a>, WriteExpect<'a, observer::Dispatcher<'static>>, WriteStorage<'a, MeleeEvent>, ReadStorage<'a, Properties>);
+    type SystemData = (specs::Entities<'a>, WriteExpect<'a, observer::Dispatcher<'static>>, WriteStorage<'a, MeleeEvent>, ReadStorage<'a, Properties>, ReadStorage<'a, Fighter>);
 
-    fn run(&mut self, (entities, mut dispatcher, mut melee_storage, properties): Self::SystemData) {
+    fn run(&mut self, (entities, mut dispatcher, mut melee_storage, properties, fighter_storage): Self::SystemData) {
         use specs::Join;
 
         let mut to_remove = Vec::new();
 
         for (ent, melee, prop) in (&*entities, &mut melee_storage, &properties).join() {
-            let p = properties.get(melee.0).unwrap();
-            dispatcher.dispatch(observer::Event::Log(ent, format!("{} attacked the {}", p.name, prop.name)));
+            if let Some(ref atk) = fighter_storage.get(melee.0) {
+                // if the one attacking cannot attack, we don't attack
+                let def = if let Some(ref def) = fighter_storage.get(ent) {
+                    def.defense
+                } else {
+                    0 // if it's not a fighter, then it doesn't have any defense!
+                };
+                let p = properties.get(melee.0).unwrap();
+                dispatcher.dispatch(observer::Event::Log(ent, format!("{} attacked the {}", p.name, prop.name)));
+            }
             to_remove.push(ent);
         }
         for e in to_remove {
@@ -187,16 +215,20 @@ pub fn create_player(world: &mut World, x: i32, y: i32) -> specs::Entity {
     world.create_entity()
         .with(Position::new(x, y, 1))
         .with(Displayable::new('@', tcod::colors::WHITE))
-        .with(Properties::new("You", true, true))
+        .with(Properties::new("You", true, true, 30, 30))
+        .with(Fighter::new(5, 2))
         .build()
 }
 
-pub fn create_npc(world: &mut World, x: i32, y: i32, c: char, name: &str, color: tcod::colors::Color) {
-    world.create_entity()
+pub fn create_npc(world: &mut World, x: i32, y: i32, c: char, name: &str, max_hp: i32, hp: i32, fighter: Option<Fighter>, color: tcod::colors::Color) {
+    let e = world.create_entity()
         .with(Position::new(x, y, 0))
         .with(Displayable::new(c, color))
-        .with(Properties::new(name, true, true))
+        .with(Properties::new(name, true, true, max_hp, hp))
         .build();
+    if let Some(f) = fighter {
+        world.write_storage::<Fighter>().insert(e, f);
+    }
 }
 
 pub fn create_world<'a, 'b>(con: tcod::console::Offscreen) -> (World, Dispatcher<'a, 'b>) {

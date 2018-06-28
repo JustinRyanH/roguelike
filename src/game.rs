@@ -58,9 +58,9 @@ impl<'a, 'b> Game<'a, 'b> {
                     let y = rng.get_int(room.y1 + 1, room.y2 - 1);
 
                     if rng.get_int(0, 100) < 80 {
-                        create_npc(&mut world, x, y, 'o', "Orc", tcod::colors::DESATURATED_GREEN);
+                        create_npc(&mut world, x, y, 'o', "Orc", 10, 10, Some(Fighter::new(3, 0)), tcod::colors::DESATURATED_GREEN);
                     } else {
-                        create_npc(&mut world, x, y, 'T', "Troll", tcod::colors::DARKER_GREEN);
+                        create_npc(&mut world, x, y, 'T', "Troll", 16, 16, Some(Fighter::new(4, 1)), tcod::colors::DARKER_GREEN);
                     };
                 }
             },
