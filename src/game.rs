@@ -5,14 +5,34 @@ use tcod;
 use tcod::Console;
 
 use map;
-use rand;
 
+use observer;
 use observer::*;
+
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Copy, PartialEq)]
+enum PlayerAction {
+    TookTurn,
+    DidntTakeTurn
+}
+
+struct Log;
+
+impl Listener for Log {
+    fn notify(&mut self, event: &observer::Event) {
+        println!("{:?}", event);
+    }
+}
+
+use std;
+unsafe impl std::marker::Send for Log {}
 
 pub struct Game<'a, 'b> {
     world: World,
     dispatcher: Dispatcher<'a, 'b>,
-    player: Entity
+    player: Entity,
+    action: PlayerAction
 }
 
 impl<'a, 'b> Game<'a, 'b> {
@@ -20,15 +40,25 @@ impl<'a, 'b> Game<'a, 'b> {
         let mut con = tcod::console::Offscreen::new(screen_width, screen_height);
         con.set_default_foreground(tcod::colors::WHITE);
 
-        let map = map::Map::new(screen_width, screen_height - 15);
+        let mut map = map::Map::new(screen_width, screen_height - 15);
 
-        let (mut world, dispatcher) = create_world(con, map, tcod::random::Rng::new_with_seed(tcod::random::Algo::CMWC, seed));
+        let mut rng = tcod::random::Rng::new_with_seed(tcod::random::Algo::CMWC, seed);
 
-        let player = create_player(&mut world, 25, 23);
+        let (x, y) = map.generate_map(&mut rng);
+
+        let (mut world, dispatcher) = create_world(con, map, rng);
+
+        let player = create_player(&mut world, x, y);
+
+        let logger = Arc::new(Mutex::new(Log));
+        world.write_resource::<observer::Dispatcher>().register_listener(logger);
+        world.add_resource(Player(player.clone()));
+
         Game {
             world: world,
             dispatcher: dispatcher,
-            player: player
+            player: player,
+            action: PlayerAction::TookTurn
         }
     }
 
@@ -41,10 +71,16 @@ impl<'a, 'b> Game<'a, 'b> {
             Key { code: KeyCode::Down, .. } => (0, 1),
             Key { code: KeyCode::Left, .. } => (-1, 0),
             Key { code: KeyCode::Right, .. } => (1, 0),
-            Key { code: KeyCode::Escape, .. } => return Transition::Quit,
+            Key { code: KeyCode::Escape, .. } => return Transition::Pop,
             _ => (0, 0),
         };
-        event_storage.insert(self.player, MoveEvent(dx, dy)).unwrap();
+        self.action = if dx == 0 && dy == 0 {
+            PlayerAction::DidntTakeTurn
+        } else {
+            event_storage.insert(self.player, MoveEvent(dx, dy)).unwrap();
+            PlayerAction::TookTurn
+
+        };
         Transition::None
     }
 }
@@ -57,6 +93,9 @@ impl<'a, 'b> State for Game<'a, 'b> {
     }
 
     fn update(&mut self) -> Transition {
+        if self.action == PlayerAction::DidntTakeTurn {
+            return Transition::None
+        }
         self.world.write_resource::<Turns>().0 += 1;
         self.dispatcher.dispatch(&mut self.world.res);
         self.world.maintain();

@@ -3,12 +3,14 @@ use tcod;
 use std;
 use map;
 
-use specs::{Component, VecStorage};
+use specs::VecStorage;
 use specs::World;
 use specs::{WriteStorage, WriteExpect, ReadStorage, ReadExpect, System};
 use specs::{Dispatcher, DispatcherBuilder};
 
 use std::sync::{Arc, Mutex};
+
+use observer;
 
 #[derive(Component)]
 #[storage(VecStorage)]
@@ -83,9 +85,9 @@ impl<'a> System<'a> for Print {
 
 struct HandleMoveEvents;
 impl<'a> System<'a> for HandleMoveEvents {
-    type SystemData = (specs::Entities<'a>, ReadExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>);
+    type SystemData = (specs::Entities<'a>, WriteExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>, WriteExpect<'a, observer::Dispatcher<'static>>, ReadExpect<'a, Player>);
 
-    fn run(&mut self, (entities, map, mut pos, mut event_storage): Self::SystemData) {
+    fn run(&mut self, (entities, mut map, mut pos, mut event_storage, mut dispatcher, player): Self::SystemData) {
         use specs::Join;
 
         let mut to_remove = Vec::new();
@@ -96,6 +98,10 @@ impl<'a> System<'a> for HandleMoveEvents {
                 pos.old_y = pos.y;
                 pos.x += event.0;
                 pos.y += event.1;
+                dispatcher.dispatch(observer::Event::Log(ent, format!("Moved {} {}", pos.x, pos.y)));
+                if ent == player.0 {
+                    map.recompute_fov(pos.x, pos.y);
+                }
             }
             to_remove.push(ent);
         }
@@ -108,6 +114,8 @@ impl<'a> System<'a> for HandleMoveEvents {
 pub struct Turns(pub i64);
 
 pub struct Rng(pub Arc<Mutex<tcod::random::Rng>>);
+
+pub struct Player(pub specs::Entity);
 
 pub struct DisplayConsole(Arc<Mutex<tcod::console::Offscreen>>);
 impl DisplayConsole {
@@ -143,6 +151,7 @@ pub fn create_world<'a, 'b>(con: tcod::console::Offscreen, map: map::Map, rng: t
     world.add_resource(Turns(0));
     world.add_resource(map);
     world.add_resource(Rng(Arc::new(Mutex::new(rng))));
+    world.add_resource(observer::Dispatcher::new());
     let mut dispatcher = DispatcherBuilder::new()
         .with(HandleMoveEvents, "move_event", &[])
         .with_thread_local(Print).build();
