@@ -24,22 +24,26 @@ struct Position {
 
 #[derive(Component)]
 #[storage(VecStorage)]
-struct Properties {
+pub struct Properties {
     name: String,
-    blocks: bool,
-    alive: bool,
+    pub blocks: bool,
+    pub alive: bool,
     max_hp: i32,
-    hp: i32
+    hp: i32,
+    death_callback: Option<Box<Mutex<Fn(&mut Properties, &mut Displayable) + std::marker::Send + 'static>>>
 }
 
 impl Properties {
-    fn new(name: &str, blocks: bool, alive: bool, max_hp: i32, hp: i32) -> Self {
+    fn new<FN>(name: &str, blocks: bool, alive: bool, max_hp: i32, hp: i32, f: FN) -> Self 
+        where FN: Fn(&mut Properties, &mut Displayable) + std::marker::Send + 'static
+    {
         Properties {
             name: name.into(),
             blocks: blocks,
             alive: alive,
             max_hp: max_hp,
-            hp: hp
+            hp: hp,
+            death_callback: Some(Box::new(Mutex::new(f)))
         }
     }
 }
@@ -58,9 +62,9 @@ impl Position {
 
 #[derive(Component)]
 #[storage(VecStorage)]
-struct Displayable {
-    char: char,
-    color: tcod::colors::Color,
+pub struct Displayable {
+    pub char: char,
+    pub color: tcod::colors::Color,
 }
 
 impl Displayable {
@@ -79,6 +83,10 @@ pub struct MoveEvent(pub i32, pub i32);
 #[derive(Component)]
 #[storage(VecStorage)]
 struct MeleeEvent(specs::Entity);
+
+#[derive(Component)]
+#[storage(VecStorage)]
+struct HpChange(i32);
 
 #[derive(Component)]
 #[storage(VecStorage)]
@@ -127,11 +135,39 @@ impl<'a> System<'a> for Print {
     }
 }
 
+struct HandleHpChange;
+impl <'a> System<'a> for HandleHpChange {
+    type SystemData = (specs::Entities<'a>, WriteStorage<'a, HpChange>, WriteStorage<'a, Properties>, WriteExpect<'a, observer::Dispatcher<'static>>, WriteStorage<'a, Displayable>);
+
+    fn run(&mut self, (entities, mut hp_change, mut properties, mut dispatcher, mut displayable): Self::SystemData) {
+        use specs::Join;
+
+        let mut to_remove = Vec::new();
+
+        for (ent, hp, prop, disp) in (&*entities, &mut hp_change, &mut properties, &mut displayable).join() {
+            prop.hp += hp.0;
+                if prop.hp <= 0 {
+                    prop.hp = 0;
+                    prop.alive = false;
+                    dispatcher.dispatch(observer::Event::Log(ent, format!("{} died", prop.name)));
+                    if let Some(callback) = prop.death_callback.take() {
+                        (callback.lock().unwrap())(prop, disp);
+                    }
+                }
+            to_remove.push(ent);
+        }
+
+        for e in to_remove {
+            hp_change.remove(e);
+        }
+    }
+}
+
 struct HandleMelee;
 impl<'a> System<'a> for HandleMelee {
-    type SystemData = (specs::Entities<'a>, WriteExpect<'a, observer::Dispatcher<'static>>, WriteStorage<'a, MeleeEvent>, ReadStorage<'a, Properties>, ReadStorage<'a, Fighter>);
+    type SystemData = (specs::Entities<'a>, WriteExpect<'a, observer::Dispatcher<'static>>, WriteStorage<'a, MeleeEvent>, ReadStorage<'a, Properties>, ReadStorage<'a, Fighter>, WriteStorage<'a, HpChange>);
 
-    fn run(&mut self, (entities, mut dispatcher, mut melee_storage, properties, fighter_storage): Self::SystemData) {
+    fn run(&mut self, (entities, mut dispatcher, mut melee_storage, properties, fighter_storage, mut hp_change): Self::SystemData) {
         use specs::Join;
 
         let mut to_remove = Vec::new();
@@ -145,7 +181,16 @@ impl<'a> System<'a> for HandleMelee {
                     0 // if it's not a fighter, then it doesn't have any defense!
                 };
                 let p = properties.get(melee.0).unwrap();
-                dispatcher.dispatch(observer::Event::Log(ent, format!("{} attacked the {}", p.name, prop.name)));
+                let mut damage = atk.attack - def;
+                if damage > 0 {
+                    dispatcher.dispatch(observer::Event::Log(ent, format!("{} attacked the {} for {} damage", p.name, prop.name, damage)));
+                    if let Some(change) = hp_change.get(ent) {
+                        damage -= change.0;
+                    }
+                    hp_change.insert(ent, HpChange(-damage)).unwrap();
+                } else {
+                    dispatcher.dispatch(observer::Event::Log(ent, format!("{} attacked the {} but there was no effect!", p.name, prop.name)));
+                }
             }
             to_remove.push(ent);
         }
@@ -157,9 +202,9 @@ impl<'a> System<'a> for HandleMelee {
 
 struct HandleMoveEvents;
 impl<'a> System<'a> for HandleMoveEvents {
-    type SystemData = (specs::Entities<'a>, WriteExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>, WriteExpect<'a, observer::Dispatcher<'static>>, ReadExpect<'a, Player>, ReadStorage<'a, Properties>, WriteStorage<'a, MeleeEvent>);
+    type SystemData = (specs::Entities<'a>, WriteExpect<'a, map::Map>, WriteStorage<'a, Position>, WriteStorage<'a, MoveEvent>, ReadExpect<'a, Player>, ReadStorage<'a, Properties>, WriteStorage<'a, MeleeEvent>);
 
-    fn run(&mut self, (entities, mut map, mut pos, mut event_storage, mut dispatcher, player, properties, mut melee_storage): Self::SystemData) {
+    fn run(&mut self, (entities, mut map, mut pos, mut event_storage, player, properties, mut melee_storage): Self::SystemData) {
         use specs::Join;
 
         let mut to_remove = Vec::new();
@@ -215,19 +260,25 @@ pub fn create_player(world: &mut World, x: i32, y: i32) -> specs::Entity {
     world.create_entity()
         .with(Position::new(x, y, 1))
         .with(Displayable::new('@', tcod::colors::WHITE))
-        .with(Properties::new("You", true, true, 30, 30))
+        .with(Properties::new("You", true, true, 30, 30, |props, display| {
+            props.alive = false;
+            display.char = '%';
+            display.color = tcod::colors::DARK_RED;
+        }))
         .with(Fighter::new(5, 2))
         .build()
 }
 
-pub fn create_npc(world: &mut World, x: i32, y: i32, c: char, name: &str, max_hp: i32, hp: i32, fighter: Option<Fighter>, color: tcod::colors::Color) {
+pub fn create_npc<FN>(world: &mut World, x: i32, y: i32, c: char, name: &str, max_hp: i32, hp: i32, fighter: Option<Fighter>, f: FN, color: tcod::colors::Color)
+    where FN: Fn(&mut Properties, &mut Displayable) + std::marker::Send + 'static
+    {
     let e = world.create_entity()
         .with(Position::new(x, y, 0))
         .with(Displayable::new(c, color))
-        .with(Properties::new(name, true, true, max_hp, hp))
+        .with(Properties::new(name, true, true, max_hp, hp, f))
         .build();
     if let Some(f) = fighter {
-        world.write_storage::<Fighter>().insert(e, f);
+        world.write_storage::<Fighter>().insert(e, f).unwrap();
     }
 }
 
@@ -242,6 +293,7 @@ pub fn create_world<'a, 'b>(con: tcod::console::Offscreen) -> (World, Dispatcher
     let mut dispatcher = DispatcherBuilder::new()
         .with(HandleMoveEvents, "move_event", &[])
         .with(HandleMelee, "melee_event", &["move_event"])
+        .with(HandleHpChange, "hp_change", &["melee_event"])
         .with_thread_local(Print).build();
     dispatcher.setup(&mut world.res);
     (world, dispatcher)
